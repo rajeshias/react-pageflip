@@ -46,7 +46,7 @@
         "typescript-plugin-css-modules": "^2.7.0"
     },
     "dependencies": {
-        "page-flip": "latest"
+        "page-flip": "github:rajeshias/StPageFlip"
     },
     "keywords": [
         "react",
