@@ -9,12 +9,15 @@ import React, {
 
 import { PageFlip } from 'page-flip';
 import { IFlipSetting, IEventProps } from './settings';
+import { usePageFlipAudio } from './usePageFlipAudio';
 
 interface IProps extends IFlipSetting, IEventProps {
     className: string;
     style: React.CSSProperties;
     children: React.ReactNode;
     renderOnlyPageLengthChange?: boolean;
+    /** Enable page-flip sound effects. Defaults to false. */
+    enableAudio?: boolean;
 }
 
 const HTMLFlipBookForward = React.forwardRef(
@@ -24,6 +27,9 @@ const HTMLFlipBookForward = React.forwardRef(
         const pageFlip = useRef<PageFlip>();
 
         const [pages, setPages] = useState<ReactElement[]>([]);
+
+        const { handleChangeState: audioChangeState, handleFlipProgress: audioFlipProgress } =
+            usePageFlipAudio();
 
         useImperativeHandle(ref, () => ({
             pageFlip: () => pageFlip.current,
@@ -44,6 +50,7 @@ const HTMLFlipBookForward = React.forwardRef(
                 flip.off('changeState');
                 flip.off('init');
                 flip.off('update');
+                flip.off('flipProgress');
             }
         }, []);
 
@@ -85,9 +92,10 @@ const HTMLFlipBookForward = React.forwardRef(
                         flip.on('changeOrientation', (e: unknown) => props.onChangeOrientation(e));
                     }
 
-                    if (props.onChangeState) {
-                        flip.on('changeState', (e: unknown) => props.onChangeState(e));
-                    }
+                    flip.on('changeState', (e: unknown) => {
+                        if (props.enableAudio) audioChangeState(e as { data: unknown });
+                        if (props.onChangeState) props.onChangeState(e);
+                    });
 
                     if (props.onInit) {
                         flip.on('init', (e: unknown) => props.onInit(e));
@@ -96,6 +104,11 @@ const HTMLFlipBookForward = React.forwardRef(
                     if (props.onUpdate) {
                         flip.on('update', (e: unknown) => props.onUpdate(e));
                     }
+
+                    flip.on('flipProgress', (e: unknown) => {
+                        if (props.enableAudio) audioFlipProgress(e as { data: unknown });
+                        if (props.onFlipProgress) props.onFlipProgress(e);
+                    });
                 }
             };
 

@@ -60,4 +60,5 @@ export interface IEventProps {
     onChangeState?: (flipEvent: any) => void;
     onInit?: (flipEvent: any) => void;
     onUpdate?: (flipEvent: any) => void;
+    onFlipProgress?: (flipEvent: any) => void;
 }
