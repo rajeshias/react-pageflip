@@ -210,9 +210,9 @@ const HTMLFlipBookForward = React.forwardRef((props, ref) => {
                 if (props.onChangeOrientation) {
                     flip.on('changeOrientation', (e) => props.onChangeOrientation(e));
                 }
-                // Always feed changeState into the audio engine; also forward to consumer
                 flip.on('changeState', (e) => {
-                    audioChangeState(e);
+                    if (props.enableAudio)
+                        audioChangeState(e);
                     if (props.onChangeState)
                         props.onChangeState(e);
                 });
@@ -222,9 +222,9 @@ const HTMLFlipBookForward = React.forwardRef((props, ref) => {
                 if (props.onUpdate) {
                     flip.on('update', (e) => props.onUpdate(e));
                 }
-                // Always wire flipProgress for audio; also forward to consumer
                 flip.on('flipProgress', (e) => {
-                    audioFlipProgress(e);
+                    if (props.enableAudio)
+                        audioFlipProgress(e);
                     if (props.onFlipProgress)
                         props.onFlipProgress(e);
                 });
