@@ -118,6 +118,8 @@ function usePageFlipAudio() {
             return;
         // Start the source on the first forward frame
         if (!sourceRef.current) {
+            if (ctx.state === 'suspended')
+                ctx.resume();
             const src = ctx.createBufferSource();
             src.buffer = buffer;
             src.connect(ctx.destination);
