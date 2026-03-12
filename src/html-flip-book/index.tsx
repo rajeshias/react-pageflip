@@ -16,6 +16,8 @@ interface IProps extends IFlipSetting, IEventProps {
     style: React.CSSProperties;
     children: React.ReactNode;
     renderOnlyPageLengthChange?: boolean;
+    /** Enable page-flip sound effects. Defaults to false. */
+    enableAudio?: boolean;
 }
 
 const HTMLFlipBookForward = React.forwardRef(
@@ -90,9 +92,8 @@ const HTMLFlipBookForward = React.forwardRef(
                         flip.on('changeOrientation', (e: unknown) => props.onChangeOrientation(e));
                     }
 
-                    // Always feed changeState into the audio engine; also forward to consumer
                     flip.on('changeState', (e: unknown) => {
-                        audioChangeState(e as { data: unknown });
+                        if (props.enableAudio) audioChangeState(e as { data: unknown });
                         if (props.onChangeState) props.onChangeState(e);
                     });
 
@@ -104,9 +105,8 @@ const HTMLFlipBookForward = React.forwardRef(
                         flip.on('update', (e: unknown) => props.onUpdate(e));
                     }
 
-                    // Always wire flipProgress for audio; also forward to consumer
                     flip.on('flipProgress', (e: unknown) => {
-                        audioFlipProgress(e as { data: unknown });
+                        if (props.enableAudio) audioFlipProgress(e as { data: unknown });
                         if (props.onFlipProgress) props.onFlipProgress(e);
                     });
                 }

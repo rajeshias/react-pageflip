@@ -59,6 +59,20 @@ export function usePageFlipAudio() {
                 killedRef.current = false;
                 lastProgressRef.current = 0;
                 lastTimeRef.current = 0;
+
+                // Start audio immediately — flipProgress is not emitted by page-flip
+                const ctx = ctxRef.current;
+                const buffer = buffersRef.current[lockedIdxRef.current];
+                if (ctx && buffer && !sourceRef.current) {
+                    if (ctx.state === 'suspended') ctx.resume();
+                    const src = ctx.createBufferSource();
+                    src.buffer = buffer;
+                    src.connect(ctx.destination);
+                    src.start(0);
+                    src.onended = () => { sourceRef.current = null; };
+                    sourceRef.current = src;
+                    lastTimeRef.current = ctx.currentTime;
+                }
             }
         } else if (state === 'read') {
             stopSource();
@@ -90,6 +104,7 @@ export function usePageFlipAudio() {
 
         // Start the source on the first forward frame
         if (!sourceRef.current) {
+            if (ctx.state === 'suspended') ctx.resume();
             const src = ctx.createBufferSource();
             src.buffer = buffer;
             src.connect(ctx.destination);
