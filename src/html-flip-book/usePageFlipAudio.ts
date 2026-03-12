@@ -1,38 +1,24 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { DEFAULT_SOUND_URLS } from './defaultSounds';
 
-function reverseAudioBuffer(ctx: AudioContext, buffer: AudioBuffer): AudioBuffer {
-    const reversed = ctx.createBuffer(
-        buffer.numberOfChannels,
-        buffer.length,
-        buffer.sampleRate,
-    );
-    for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
-        const src = buffer.getChannelData(ch);
-        const dst = reversed.getChannelData(ch);
-        for (let i = 0; i < src.length; i++) {
-            dst[i] = src[src.length - 1 - i];
-        }
-    }
-    return reversed;
-}
+// A full flip in this many seconds = playbackRate 1.0
+// Tune this if audio feels too fast or too slow on a normal swipe.
+const REFERENCE_FLIP_DURATION = 0.3;
 
 export function usePageFlipAudio() {
-    const urls = DEFAULT_SOUND_URLS;
     const ctxRef = useRef<AudioContext | null>(null);
     const buffersRef = useRef<AudioBuffer[]>([]);
-    const reversedRef = useRef<AudioBuffer[]>([]);
 
-    // State tracked across frames
-    const lockedIdxRef = useRef(-1);       // which of the 6 sounds is locked for this flip
+    const lockedIdxRef = useRef(-1);
     const sourceRef = useRef<AudioBufferSourceNode | null>(null);
-    const playStartTimeRef = useRef(0);    // audioCtx.currentTime when current source started
-    const playOffsetRef = useRef(0);       // buffer offset (seconds) when current source started
-    const lastDirectionRef = useRef(-1);   // 0 = FORWARD, 1 = BACK
-    const isPlayingRef = useRef(false);
+    const killedRef = useRef(false);
+
+    // For playbackRate calculation
+    const lastProgressRef = useRef(0);
+    const lastTimeRef = useRef(0);
 
     useEffect(() => {
-        if (!urls || urls.length === 0) return;
+        if (!DEFAULT_SOUND_URLS.length) return;
 
         const AudioContextClass =
             window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
@@ -40,53 +26,27 @@ export function usePageFlipAudio() {
         ctxRef.current = ctx;
 
         Promise.all(
-            urls.map((url) =>
+            DEFAULT_SOUND_URLS.map((url) =>
                 fetch(url)
                     .then((r) => r.arrayBuffer())
                     .then((ab) => ctx.decodeAudioData(ab)),
             ),
         ).then((decoded) => {
             buffersRef.current = decoded;
-            reversedRef.current = decoded.map((buf) => reverseAudioBuffer(ctx, buf));
         });
 
         return () => {
             stopSource();
             ctx.close();
         };
-        // soundUrls is expected to be stable (defined once by consumer)
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     function stopSource() {
         if (sourceRef.current) {
-            try {
-                sourceRef.current.stop();
-            } catch {
-                // already stopped
-            }
+            try { sourceRef.current.stop(); } catch { /* already stopped */ }
             sourceRef.current = null;
         }
-        isPlayingRef.current = false;
-    }
-
-    function startAt(buffer: AudioBuffer, offset: number) {
-        const ctx = ctxRef.current;
-        if (!ctx) return;
-
-        stopSource();
-
-        const src = ctx.createBufferSource();
-        src.buffer = buffer;
-        src.connect(ctx.destination);
-
-        const clamped = Math.max(0, Math.min(offset, buffer.duration - 0.001));
-        src.start(0, clamped);
-
-        sourceRef.current = src;
-        playStartTimeRef.current = ctx.currentTime;
-        playOffsetRef.current = clamped;
-        isPlayingRef.current = true;
     }
 
     /** Wire to page-flip's changeState event */
@@ -94,14 +54,16 @@ export function usePageFlipAudio() {
         const state = e.data as string;
 
         if (state === 'user_fold' || state === 'flipping') {
-            // Lock a random sound for the duration of this flip
             if (lockedIdxRef.current === -1 && buffersRef.current.length > 0) {
                 lockedIdxRef.current = Math.floor(Math.random() * buffersRef.current.length);
+                killedRef.current = false;
+                lastProgressRef.current = 0;
+                lastTimeRef.current = 0;
             }
         } else if (state === 'read') {
             stopSource();
             lockedIdxRef.current = -1;
-            lastDirectionRef.current = -1;
+            killedRef.current = false;
         }
     }, []);
 
@@ -109,44 +71,50 @@ export function usePageFlipAudio() {
     const handleFlipProgress = useCallback((e: { data: unknown }) => {
         const { progress, direction } = e.data as { progress: number; direction: number };
 
-        const idx = lockedIdxRef.current;
-        if (idx === -1) return;
+        if (lockedIdxRef.current === -1) return;
 
-        const ctx = ctxRef.current;
-        if (!ctx) return;
-
-        const buffers = buffersRef.current;
-        const reversed = reversedRef.current;
-        if (!buffers[idx]) return;
-
-        const isForward = direction === 0;
-        const buffer = isForward ? buffers[idx] : reversed[idx];
-
-        // Expected playback position in the buffer (seconds)
-        const expectedOffset = isForward
-            ? (progress / 100) * buffer.duration
-            : ((100 - progress) / 100) * buffer.duration;
-
-        // Direction changed → restart at the mirrored position
-        if (direction !== lastDirectionRef.current) {
-            lastDirectionRef.current = direction;
-            startAt(buffer, expectedOffset);
+        // Direction reversed → kill audio for this flip
+        if (direction !== 0) {
+            if (!killedRef.current) {
+                killedRef.current = true;
+                stopSource();
+            }
             return;
         }
 
-        if (isPlayingRef.current) {
-            // Check how far the natural playback has drifted from the expected position
-            const elapsed = ctx.currentTime - playStartTimeRef.current;
-            const actualOffset = playOffsetRef.current + elapsed;
-            const drift = Math.abs(actualOffset - expectedOffset);
+        if (killedRef.current) return;
 
-            // Only restart if drift exceeds 50 ms — avoids audio clicking every frame
-            if (drift > 0.05) {
-                startAt(buffer, expectedOffset);
-            }
-        } else {
-            startAt(buffer, expectedOffset);
+        const ctx = ctxRef.current;
+        const buffer = buffersRef.current[lockedIdxRef.current];
+        if (!ctx || !buffer) return;
+
+        // Start the source on the first forward frame
+        if (!sourceRef.current) {
+            const src = ctx.createBufferSource();
+            src.buffer = buffer;
+            src.connect(ctx.destination);
+            src.start(0);
+            src.onended = () => { sourceRef.current = null; };
+            sourceRef.current = src;
+            lastProgressRef.current = progress;
+            lastTimeRef.current = ctx.currentTime;
+            return;
         }
+
+        // Update playbackRate based on swipe speed
+        const deltaProgress = progress - lastProgressRef.current;
+        const deltaTime = ctx.currentTime - lastTimeRef.current;
+
+        if (deltaTime > 0 && deltaProgress > 0) {
+            // (deltaProgress / 100) = fraction of flip covered
+            // divide by deltaTime to get fraction-per-second
+            // divide by (1 / REFERENCE_FLIP_DURATION) to normalise to rate 1.0
+            const rate = (deltaProgress / 100) / (deltaTime / REFERENCE_FLIP_DURATION);
+            sourceRef.current.playbackRate.value = Math.min(Math.max(rate, 0.05), 2.0);
+        }
+
+        lastProgressRef.current = progress;
+        lastTimeRef.current = ctx.currentTime;
     }, []);
 
     return { handleChangeState, handleFlipProgress };
